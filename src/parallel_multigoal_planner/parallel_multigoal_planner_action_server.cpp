@@ -14,11 +14,23 @@
 #include <graph_core/samplers/uniform_sampler.h>
 
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
+#include <rclcpp/version.h>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 
 namespace parallel_multigoal_planner
 {
+
+namespace
+{
+// Humble's create_client() only takes rmw_qos_profile_t; Jazzy (rclcpp 28+) takes rclcpp::QoS
+// and deprecates the rmw overload.
+#if RCLCPP_VERSION_MAJOR >= 28
+rclcpp::QoS serviceQoS() {return rclcpp::ServicesQoS();}
+#else
+const rmw_qos_profile_t & serviceQoS() {return rmw_qos_profile_services_default;}
+#endif
+}  // namespace
 
 ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const rclcpp::Node::SharedPtr& node)
   : node_(node)
@@ -55,11 +67,11 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
   cb_group_collision_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   bounds_client_ = node_->create_client<ik_solver_msgs::srv::GetBound>(
-      "/" + ik_solver_ns + "/get_bounds", rclcpp::QoS(10), cb_group_bounds_);
+      "/" + ik_solver_ns + "/get_bounds", serviceQoS(), cb_group_bounds_);
   ik_client_ = node_->create_client<ik_solver_msgs::srv::GetIkArray>(
-      "/" + ik_solver_ns + "/get_task_redundant_ik_array", rclcpp::QoS(10), cb_group_ik_);
+      "/" + ik_solver_ns + "/get_task_redundant_ik_array", serviceQoS(), cb_group_ik_);
   collision_client_ = node_->create_client<ik_solver_msgs::srv::CollisionChecking>(
-      collision_check_service, rclcpp::QoS(10), cb_group_collision_);
+      collision_check_service, serviceQoS(), cb_group_collision_);
 
   goal_builder_ =
       std::make_unique<GoalSetBuilder>(bounds_client_, ik_client_, collision_client_, logger_, service_timeout_s_);
