@@ -1,0 +1,28 @@
+# Doxygen configuration. Generate the documentation with:
+#   doxygen Doxyfile
+# and open doxygen/html/index.html
+
+PROJECT_NAME           = "parallel_multigoal_planner"
+PROJECT_BRIEF          = "ROS 2 action server for multi-goal motion planning with MI-RRT*"
+OUTPUT_DIRECTORY       = doxygen
+
+INPUT                  = README.md docs include src scripts
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp *.cpp *.py *.md
+EXCLUDE_PATTERNS       = */build/* */install/* */log/* */doxygen/* */.git/* */docs/API.md
+USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_SUPPORT       = YES
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+SOURCE_BROWSER         = YES
+BUILTIN_STL_SUPPORT    = YES
+WARN_IF_UNDOCUMENTED   = YES
+QUIET                  = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+HAVE_DOT               = NO

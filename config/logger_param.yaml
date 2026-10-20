@@ -1,0 +1,4 @@
+appenders: ["screen"]
+levels: ["info"]
+pattern_layout: '[%M:%L]: %m%n'
+file_name: "parallel_multigoal_planner"

@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>parallel_multigoal_planner</name>
+  <version>0.0.0</version>
+  <description>
+    Action server that plans a motion reaching any one of several alternative
+    Cartesian/joint-space goals, using ik_solver + collision_checker_server to
+    build a candidate joint-space goal set and mirrt_star (MultigoalSolver) to
+    plan a path to it.
+  </description>
+
+  <maintainer email="manuel.beschi@unibs.it">Manuel Beschi</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>moveit_msgs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>ament_index_cpp</depend>
+
+  <depend>parallel_multigoal_planner_msgs</depend>
+  <depend>ik_solver_msgs</depend>
+  <depend>mirrt_star</depend>
+  <depend>graph_core</depend>
+  <depend>cnr_logger</depend>
+
+  <exec_depend>ik_solver</exec_depend>
+  <exec_depend>collision_checker_server</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
