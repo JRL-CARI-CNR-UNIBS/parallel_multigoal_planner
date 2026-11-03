@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <parallel_multigoal_planner/goal_set_builder.hpp>
 #include <parallel_multigoal_planner/joint_order_utils.hpp>
 
@@ -6,6 +8,11 @@
 
 namespace parallel_multigoal_planner
 {
+
+namespace
+{
+const rclcpp::Logger kLogger = rclcpp::get_logger("parallel_multigoal_planner.goal_set_builder");
+}  // namespace
 
 GoalSetBuilder::GoalSetBuilder(rclcpp::Client<ik_solver_msgs::srv::GetBound>::SharedPtr bounds_client,
                                rclcpp::Client<ik_solver_msgs::srv::GetIkArray>::SharedPtr ik_client,
@@ -28,6 +35,7 @@ bool GoalSetBuilder::fetchJointModel(std::vector<std::string>& joint_names, Eige
     return false;
   }
 
+  RCLCPP_DEBUG(kLogger, "fetchJointModel: calling '%s'", bounds_client_->get_service_name());
   auto request = std::make_shared<ik_solver_msgs::srv::GetBound::Request>();
   auto future = bounds_client_->async_send_request(request);
   if (future.wait_for(std::chrono::duration<double>(service_timeout_s_)) != std::future_status::ready)
@@ -55,6 +63,8 @@ bool GoalSetBuilder::fetchJointModel(std::vector<std::string>& joint_names, Eige
     lower_bound(static_cast<Eigen::Index>(i)) = b.lower_bound;
     upper_bound(static_cast<Eigen::Index>(i)) = b.upper_bound;
   }
+
+  RCLCPP_DEBUG(kLogger, "fetchJointModel: received %zu joint(s).", joint_names.size());
 
   return true;
 }
@@ -89,6 +99,7 @@ std::vector<bool> GoalSetBuilder::filterCollisionFree(const std::vector<Eigen::V
     return feasible;
   }
 
+  RCLCPP_DEBUG(kLogger, "filterCollisionFree: checking %zu configuration(s).", configs.size());
   auto request = std::make_shared<ik_solver_msgs::srv::CollisionChecking::Request>();
   request->joint_names = joint_names;
   request->detailed = false;
@@ -118,6 +129,8 @@ std::vector<bool> GoalSetBuilder::filterCollisionFree(const std::vector<Eigen::V
   for (size_t i = 0; i < response->result.size(); ++i)
     feasible[i] = (response->result[i].feasibility > 0.5) && !response->result[i].out_of_bound;
 
+  RCLCPP_DEBUG(kLogger, "filterCollisionFree: %zu/%zu configuration(s) feasible.",
+               static_cast<size_t>(std::count(feasible.begin(), feasible.end(), true)), configs.size());
   return feasible;
 }
 
@@ -149,6 +162,10 @@ bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
   request->targets.push_back(target);
   request->seed_joint_names = canonical_joint_names;
 
+  RCLCPP_DEBUG(kLogger, "solveCartesianGoal: IK request frame='%s' pos=(%.4f, %.4f, %.4f) quat=(%.4f, %.4f, %.4f, %.4f)",
+               target.pose.header.frame_id.c_str(), target.pose.pose.position.x, target.pose.pose.position.y,
+               target.pose.pose.position.z, target.pose.pose.orientation.x, target.pose.pose.orientation.y,
+               target.pose.pose.orientation.z, target.pose.pose.orientation.w);
   auto future = ik_client_->async_send_request(request);
   if (future.wait_for(std::chrono::duration<double>(service_timeout_s_)) != std::future_status::ready)
   {
@@ -180,10 +197,18 @@ bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
     return true;  // not an error: this goal element simply contributes nothing
   }
 
+  RCLCPP_DEBUG(kLogger, "solveCartesianGoal: %zu IK solution(s) received.", ik_configs.size());
+
   std::vector<bool> feasible = filterCollisionFree(ik_configs, canonical_joint_names);
+  size_t added = 0;
   for (size_t i = 0; i < ik_configs.size(); ++i)
     if (feasible[i])
+    {
       out_configs.push_back(ik_configs[i]);
+      ++added;
+    }
+
+  RCLCPP_DEBUG(kLogger, "solveCartesianGoal: %zu collision-free configuration(s) added.", added);
 
   return true;
 }
@@ -199,6 +224,9 @@ bool GoalSetBuilder::buildGoalConfigurations(const std::vector<moveit_msgs::msg:
     const auto& c = goal_constraints[i];
     const bool has_joint_goal = !c.joint_constraints.empty();
     const bool has_pose_goal = !c.position_constraints.empty() && !c.orientation_constraints.empty();
+
+    RCLCPP_DEBUG(kLogger, "buildGoalConfigurations: goal_constraints[%zu] type=%s", i,
+                 has_joint_goal ? "joint" : (has_pose_goal ? "cartesian" : "invalid"));
 
     if (has_joint_goal)
     {
@@ -228,6 +256,7 @@ bool GoalSetBuilder::buildGoalConfigurations(const std::vector<moveit_msgs::msg:
     }
   }
 
+  RCLCPP_DEBUG(kLogger, "buildGoalConfigurations: %zu goal configuration(s) total.", goal_configurations.size());
   return true;
 }
 

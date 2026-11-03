@@ -6,6 +6,12 @@
 namespace parallel_multigoal_planner
 {
 
+namespace
+{
+// Called very often during planning: kept in its own logger so it can be silenced independently.
+const rclcpp::Logger kLogger = rclcpp::get_logger("parallel_multigoal_planner.collision_checker");
+}  // namespace
+
 ServiceCollisionChecker::ServiceCollisionChecker(const ClientT::SharedPtr& client,
                                                   const std::vector<std::string>& joint_names,
                                                   const cnr_logger::TraceLoggerPtr& logger,
@@ -58,6 +64,8 @@ std::vector<bool> ServiceCollisionChecker::batchCheck(const std::vector<Eigen::V
   for (size_t i = 0; i < response->result.size(); ++i)
     feasible[i] = (response->result[i].feasibility > 0.5) && !response->result[i].out_of_bound;
 
+  RCLCPP_DEBUG(kLogger, "batchCheck: %zu/%zu configuration(s) feasible.",
+               static_cast<size_t>(std::count(feasible.begin(), feasible.end(), true)), configurations.size());
   return feasible;
 }
 
