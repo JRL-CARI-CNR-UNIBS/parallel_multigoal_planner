@@ -16,7 +16,7 @@ const rclcpp::Logger kLogger = rclcpp::get_logger("parallel_multigoal_planner.go
 
 GoalSetBuilder::GoalSetBuilder(rclcpp::Client<ik_solver_msgs::srv::GetBound>::SharedPtr bounds_client,
                                rclcpp::Client<ik_solver_msgs::srv::GetIkArray>::SharedPtr ik_client,
-                               const cnr_logger::TraceLoggerPtr& logger, double service_timeout_s)
+                               const graph::core::LoggerPtr& logger, double service_timeout_s)
   : bounds_client_(bounds_client)
   , ik_client_(ik_client)
   , logger_(logger)
@@ -135,7 +135,7 @@ bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
       std::string reorder_err;
       if (!reorderByJointName(response->joint_names, cfg.configuration, canonical_joint_names, q, reorder_err))
       {
-        CNR_WARN(logger_, "Skipping an IK solution: " << reorder_err);
+        GC_WARN(logger_, "Skipping an IK solution: " << reorder_err);
         continue;
       }
       ik_configs.push_back(std::move(q));
@@ -144,7 +144,7 @@ bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
 
   if (ik_configs.empty())
   {
-    CNR_WARN(logger_, "get_task_redundant_ik_array found no IK solution for this Cartesian goal.");
+    GC_WARN(logger_, "get_task_redundant_ik_array found no IK solution for this Cartesian goal.");
     return true;  // not an error: this goal element simply contributes nothing
   }
 

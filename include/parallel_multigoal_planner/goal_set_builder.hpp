@@ -13,7 +13,7 @@
 #include <ik_solver_msgs/srv/get_bound.hpp>
 #include <ik_solver_msgs/srv/get_ik_array.hpp>
 
-#include <cnr_logger/cnr_logger.h>
+#include <graph_core/logger.h>
 #include <graph_core/collision_checkers/collision_checker_base.h>
 
 namespace parallel_multigoal_planner
@@ -50,7 +50,7 @@ public:
    */
   GoalSetBuilder(rclcpp::Client<ik_solver_msgs::srv::GetBound>::SharedPtr bounds_client,
                  rclcpp::Client<ik_solver_msgs::srv::GetIkArray>::SharedPtr ik_client,
-                 const cnr_logger::TraceLoggerPtr& logger, double service_timeout_s = 5.0);
+                 const graph::core::LoggerPtr& logger, double service_timeout_s = 5.0);
 
   /**
    * @brief Query ik_solver's get_bounds service for the canonical joint set
@@ -102,7 +102,7 @@ private:
 
   rclcpp::Client<ik_solver_msgs::srv::GetBound>::SharedPtr bounds_client_;
   rclcpp::Client<ik_solver_msgs::srv::GetIkArray>::SharedPtr ik_client_;
-  cnr_logger::TraceLoggerPtr logger_;
+  graph::core::LoggerPtr logger_;
   double service_timeout_s_;
 };
 

@@ -63,14 +63,18 @@ public:
   using Action = parallel_multigoal_planner_msgs::action::ParallelMultigoalPlan;
   using GoalHandle = rclcpp_action::ServerGoalHandle<Action>;
 
+  /// Prefix of the node parameters passed to the mirrt* solver.
+  static constexpr const char* kMirrtStarPrefix = "mirrt_star";
+
   /**
    * @brief Declare the parameters, load the robot model, create the service clients and start the action server.
    *
    * Parameters: @c ik_solver_ns ("ik_solver"), @c planning_scene_service ("/get_planning_scene"),
    * @c service_timeout_s (5.0), @c default_allowed_planning_time (5.0), @c direct_connect_time (0.2),
    * @c max_iterations (1000000), @c feedback_period_iterations (200), @c waypoint_dt_s (0.5),
-   * @c checker_resolution (0.02), @c checker_threads (4),
-   * @c mirrt_star_param_ns ("/parallel_multigoal_planner/mirrt_star"), @c logger_config_file.
+   * @c checker_resolution (0.02), @c checker_threads (4).
+   * The parameters of the mirrt* solver are the node parameters under @c mirrt_star. (e.g.
+   * @c mirrt_star.max_distance); they are read at every request.
    * See docs/05-tuning-and-parameters.md.
    * @param node Node used for parameters, clients and the action server. It must not be added to an
    * executor yet: the robot model is loaded in the constructor.
@@ -176,7 +180,8 @@ private:
 
   std::unique_ptr<GoalSetBuilder> goal_builder_;
 
-  cnr_logger::TraceLoggerPtr logger_;
+  /// Logger passed to graph_core / mirrt* (child "graph_core" of the node logger).
+  graph::core::LoggerPtr logger_;
 
   // Robot model, loaded once from robot_description.
   std::shared_ptr<robot_model_loader::RobotModelLoader> robot_model_loader_;
@@ -198,7 +203,6 @@ private:
   double waypoint_dt_s_;
   double checker_resolution_;
   int checker_threads_;
-  std::string mirrt_param_ns_;
 };
 
 }  // namespace parallel_multigoal_planner

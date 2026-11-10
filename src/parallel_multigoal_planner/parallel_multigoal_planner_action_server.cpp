@@ -4,10 +4,9 @@
 #include <thread>
 #include <unordered_map>
 
-#include <ament_index_cpp/get_package_share_directory.hpp>
-
 #include <parallel_multigoal_planner/parallel_multigoal_planner_action_server.hpp>
 #include <parallel_multigoal_planner/joint_order_utils.hpp>
+#include <parallel_multigoal_planner/graph_core_ros.hpp>
 
 #include <graph_core/graph/node.h>
 #include <graph_core/graph/path.h>
@@ -51,28 +50,17 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
   waypoint_dt_s_ = node_->declare_parameter<double>("waypoint_dt_s", 0.5);
   checker_resolution_ = node_->declare_parameter<double>("checker_resolution", 0.02);
   checker_threads_ = static_cast<int>(node_->declare_parameter<int>("checker_threads", 4));
-  mirrt_param_ns_ = node_->declare_parameter<std::string>("mirrt_star_param_ns", "/parallel_multigoal_planner/mirrt_star");
 
-  std::string default_logger_config;
-  try
-  {
-    default_logger_config =
-        ament_index_cpp::get_package_share_directory("parallel_multigoal_planner") + "/config/logger_param.yaml";
-  }
-  catch (const std::exception&)
-  {
-    default_logger_config = "";
-  }
-  const std::string logger_config = node_->declare_parameter<std::string>("logger_config_file", default_logger_config);
-  logger_ = std::make_shared<cnr_logger::TraceLogger>("parallel_multigoal_planner", logger_config);
+  // graph_core / mirrt* messages go to the child logger "<node>.graph_core", so their level can be set
+  // separately, e.g. --ros-args --log-level parallel_multigoal_planner.graph_core:=debug
+  logger_ = std::make_shared<RclcppGraphLogger>(node_->get_logger().get_child("graph_core"));
 
   RCLCPP_DEBUG(node_->get_logger(),
                "Parameters: service_timeout_s=%.3f default_allowed_planning_time=%.3f direct_connect_time=%.3f "
                "max_iterations=%u feedback_period_iterations=%u waypoint_dt_s=%.3f checker_resolution=%.4f checker_threads=%d "
-               "mirrt_star_param_ns='%s' logger_config_file='%s'",
+               "(mirrt* parameters under '%s.')",
                service_timeout_s_, default_allowed_planning_time_, direct_connect_time_, max_iterations_,
-               feedback_period_iterations_, waypoint_dt_s_, checker_resolution_, checker_threads_, mirrt_param_ns_.c_str(),
-               logger_config.c_str());
+               feedback_period_iterations_, waypoint_dt_s_, checker_resolution_, checker_threads_, kMirrtStarPrefix);
 
   // Kinematics plugins are not needed: IK comes from the ik_solver node.
   robot_model_loader_ = std::make_shared<robot_model_loader::RobotModelLoader>(node_, "robot_description", false);
@@ -336,9 +324,11 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
 
   auto solver =
       std::make_shared<graph::mirrt_star::MultigoalSolver>(metrics, checker, sampler, goal_cost_fcn, logger_);
-  RCLCPP_DEBUG(node_->get_logger(), "execute: configuring MultigoalSolver from '%s' (allowed_time=%.3f s).",
-               mirrt_param_ns_.c_str(), allowed_time);
-  solver->config(mirrt_param_ns_);
+  // Read the mirrt* parameters at every request, so changes made with `ros2 param set` are used
+  const graph::core::ParamMap mirrt_params = graphParamsFromNode(node_, kMirrtStarPrefix);
+  RCLCPP_DEBUG(node_->get_logger(), "execute: configuring MultigoalSolver with %zu parameter(s) under '%s.' (allowed_time=%.3f s).",
+               mirrt_params.size(), kMirrtStarPrefix, allowed_time);
+  solver->config(mirrt_params);
 
   auto start_node = std::make_shared<graph::core::Node>(start_q, logger_);
   if (!solver->addStart(start_node))

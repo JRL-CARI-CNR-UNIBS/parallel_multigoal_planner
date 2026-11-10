@@ -35,7 +35,7 @@ All ik_solver service calls are synchronous (blocking) from the caller's point o
 ##### `GoalSetBuilder`
 
 ```cpp
-GoalSetBuilder(rclcpp::Client< ik_solver_msgs::srv::GetBound >::SharedPtr bounds_client, rclcpp::Client< ik_solver_msgs::srv::GetIkArray >::SharedPtr ik_client, const cnr_logger::TraceLoggerPtr &logger, double service_timeout_s=5.0)
+GoalSetBuilder(rclcpp::Client< ik_solver_msgs::srv::GetBound >::SharedPtr bounds_client, rclcpp::Client< ik_solver_msgs::srv::GetIkArray >::SharedPtr ik_client, const graph::core::LoggerPtr &logger, double service_timeout_s=5.0)
 ```
 
 Constructor.
@@ -117,7 +117,7 @@ ParallelMultigoalPlannerActionServer(const rclcpp::Node::SharedPtr &node)
 
 Declare the parameters, load the robot model, create the service clients and start the action server.
 
-Parameters: `ik_solver_ns` ("ik_solver"), `planning_scene_service` ("/get_planning_scene"), `service_timeout_s` (5.0), `default_allowed_planning_time` (5.0), `direct_connect_time` (0.2), `max_iterations` (1000000), `feedback_period_iterations` (200), `waypoint_dt_s` (0.5), `checker_resolution` (0.02), `checker_threads` (4), `mirrt_star_param_ns` ("/parallel_multigoal_planner/mirrt_star"), `logger_config_file`. See `docs/05-tuning-and-parameters.md`.
+Parameters: `ik_solver_ns` ("ik_solver"), `planning_scene_service` ("/get_planning_scene"), `service_timeout_s` (5.0), `default_allowed_planning_time` (5.0), `direct_connect_time` (0.2), `max_iterations` (1000000), `feedback_period_iterations` (200), `waypoint_dt_s` (0.5), `checker_resolution` (0.02), `checker_threads` (4). The parameters of the mirrt* solver are the node parameters under `mirrt_star.` (e.g. `mirrt_star.max_distance`); they are read at every request. See `docs/05-tuning-and-parameters.md`.
 
 **Parameters:**
 

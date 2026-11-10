@@ -107,7 +107,7 @@ parallel_multigoal_planner/
 │   │   ├── goal_set_builder.cpp
 │   │   └── parallel_multigoal_planner_action_server.cpp
 │   └── parallel_multigoal_planner_node.cpp       # main(): executor + action server
-├── config/logger_param.yaml                      # cnr_logger config
+├── config/mirrt_star.yaml                        # mirrt* solver parameters (ROS 2 format)
 ├── launch/parallel_multigoal_planner.launch.py
 ├── docs/                                          # tutorials, see docs/README.md
 ├── CMakeLists.txt
@@ -127,7 +127,6 @@ Planning:
 - `graph_core`, `mirrt_star` (`graph::mirrt_star::MultigoalSolver`)
 - `moveit_core`, `moveit_ros_planning` (robot model, planning scene)
 - `moveit_collision_checker` (`ParallelMoveitCollisionChecker`)
-- `cnr_logger`
 
 At runtime, the node also expects, on the ROS graph:
 - an `ik_solver` node exposing `~get_bounds` and
@@ -216,8 +215,7 @@ On failure, `motion_plan_response.error_code.val` is one of the standard
 | `waypoint_dt_s` | double | `0.5` | Fixed spacing (seconds) between consecutive `JointTrajectoryPoint`s in the result — a placeholder timing scheme, not a velocity-limited one. |
 | `checker_resolution` | double | `0.02` | Distance (configuration-space units) between the points checked along a tree edge. |
 | `checker_threads` | int | `4` | Threads used by `ParallelMoveitCollisionChecker` to check an edge. |
-| `mirrt_star_param_ns` | string | `"/parallel_multigoal_planner/mirrt_star"` | `cnr_param` namespace passed to `MultigoalSolver::config()`. Left unpopulated, mirrt_star's own defaults apply (`max_distance`, `rewire_radius`, `bidirectional`, `tube_radius`, ...) — populate params under this namespace to tune the solver, see [`docs/05-tuning-and-parameters.md`](docs/05-tuning-and-parameters.md). |
-| `logger_config_file` | string | `<share>/config/logger_param.yaml` | `cnr_logger` config file. |
+| `mirrt_star.*` | — | see `config/mirrt_star.yaml` | Parameters of the mirrt\* solver (e.g. `mirrt_star.max_distance`), passed to `MultigoalSolver::config()` at every request. Missing keys take mirrt\*'s defaults. See [docs/05-tuning-and-parameters.md](docs/05-tuning-and-parameters.md). |
 
 ## Concurrency model
 

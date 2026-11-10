@@ -1,0 +1,32 @@
+# Parameters of the mirrt* solver used by parallel_multigoal_planner, as ROS 2 node parameters.
+# Pass this file to the node (e.g. parameters=[...] in a launch file, or --ros-args --params-file).
+# They are read at every planning request, so they can also be changed with `ros2 param set`,
+# e.g. ros2 param set /parallel_multigoal_planner mirrt_star.max_distance 0.5
+# Values below are the mirrt* defaults.
+/**:
+  ros__parameters:
+    mirrt_star:
+      max_distance: 1.0          # [rad] max tree-extension step
+      use_kdtree: true
+      extend: false              # true: extend, false: connect
+      utopia_tolerance: 0.01     # accept a solution within (1 + tol) of the utopia cost
+      rewire_radius: 2.0         # RRT* rewiring radius (default 2 * max_distance)
+      mixed_strategy: true       # blend tube-informed and plain sampling per goal
+      bidirectional: true        # grow trees from start and from each goal
+      k_nearest: false
+      local_bias: 0.3
+      apple_weight: 10.0
+      tube_radius: 0.3
+      forgetting_factor: 0.01
+
+      # Goal selection (which candidate goal to grow towards). Only MultiArmedBandit/eGreedy is compiled in mirrt_star.
+      policy_type: MultiArmedBandit
+      policy_name: eGreedy
+      reward_fcn: RelativeImprovement
+      warm_start_reward: false
+      # eGreedy policy
+      epsilon_coef: 0.2          # exploration probability (random goal)
+      reward_gain: 1.0
+      egreedy_forgetting_factor: 0.0
+      egreedy_reward_forgetting_factor: 0.0
+      epsilon_exp: 1.0

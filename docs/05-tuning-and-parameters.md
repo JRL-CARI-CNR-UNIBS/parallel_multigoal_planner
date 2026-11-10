@@ -2,10 +2,9 @@
 
 There are two layers of parameters at play here: the ones the
 `parallel_multigoal_planner` node itself declares (fully wired, set them the
-normal ROS 2 way), and `mirrt_star`'s own internal solver parameters (read
-through `cnr_param`, currently running with their compiled-in defaults —
-see [below](#tuning-the-solver-itself) before assuming you can override
-them from a YAML file).
+normal ROS 2 way), and `mirrt_star`'s own solver parameters, which are also
+ROS 2 parameters of the node, under the `mirrt_star.` prefix (see
+[below](#tuning-the-solver-itself)).
 
 ## Node parameters
 
@@ -58,12 +57,27 @@ A few worth knowing about beyond the "must change per robot" set:
 
 ## Tuning the solver itself
 
-`MultigoalSolver::config(mirrt_star_param_ns)` reads its parameters through
-`cnr_param` under the namespace given by the `mirrt_star_param_ns` node
-parameter (default `/parallel_multigoal_planner/mirrt_star`). Every one of
-them has a hardcoded fallback, so **as shipped, this package always plans
-with mirrt_star's compiled-in defaults** — no separate solver config file is
-required to get a working planner.
+The solver parameters are node parameters under the `mirrt_star.` prefix
+(e.g. `mirrt_star.max_distance`). At every planning request the node copies
+them into a `graph::core::ParamMap` and passes it to
+`MultigoalSolver::config()`; parameters given to the node under that prefix
+are declared automatically. Every key has a default, so the planner also
+works without any solver parameter.
+
+[`config/mirrt_star.yaml`](../config/mirrt_star.yaml) lists all the keys
+with their defaults; the launch file loads it (argument `mirrt_star_params`):
+
+```bash
+ros2 launch parallel_multigoal_planner parallel_multigoal_planner.launch.py \
+  mirrt_star_params:=/path/to/my_mirrt_star.yaml
+```
+
+Since the parameters are read at every request, they can be changed at
+runtime:
+
+```bash
+ros2 param set /parallel_multigoal_planner mirrt_star.max_distance 0.5
+```
 
 The tunable keys, with their defaults (from
 [`graph_core::TreeSolver::config()`](../../graph_core/graph_core/src/graph_core/solvers/tree_solver.cpp)
@@ -85,25 +99,14 @@ and
 | `tube_radius` | `0.3` | Radius of the informed "tube" sampler around a candidate solution. |
 | `forgetting_factor` | `0.01` | Decay rate for `local_bias` adaptation. |
 
-If you need to change any of these, `cnr_param` supports two mechanisms
-(see the [`cnr_param` README](../../cnr_param/README.md)) — **neither is
-currently wired up in this package**, so pick one and wire it in
-`parallel_multigoal_planner_action_server.cpp` before relying on it:
+The goal selection keys (`policy_type`, `policy_name`, `reward_fcn`,
+`warm_start_reward`, `epsilon_coef`, `reward_gain`, ...) are listed in
+[`config/mirrt_star.yaml`](../config/mirrt_star.yaml).
 
-- **A mapped YAML file** — `cnr_param`'s `MAPPED_FILE` backend, independent
-  of ROS. This is how `collision_checker_server` reads its `padding`/
-  `scaling` parameters and how `ik_solver` reads its per-solver config.
-- **Live ROS 2 parameters** — requires calling
-  `cnr::param::ros2::CNR_PARAM_INIT_ROS2_MODULE(node)` once (with a
-  `std::shared_ptr<rclcpp::Node>&`, from `<cnr_param/ros2/param.h>`) before
-  the first `solver->config(...)` call; only then does `cnr::param`'s ROS2
-  backend actually query the parameter server. Without that call,
-  `graph::core::get_param()`'s `cnr::param::is_ros2_avaliable()` check is
-  false and every lookup silently falls back to the compiled-in default —
-  which is exactly the (harmless) behavior you'll see today.
+Messages of graph_core and mirrt\* go to the child logger
+`<node name>.graph_core`, so their level can be set separately:
 
-Until one of those is wired in, the only way to change solver behavior is
-to edit the defaults in `mirrt_star`'s source directly, or to construct the
-`MultigoalSolver` with your own already-configured `Metrics`/`Sampler`
-instances (`ParallelMultigoalPlannerActionServer::execute()` is the place to
-do that — see [Architecture](04-architecture.md#class-responsibilities)).
+```bash
+ros2 run parallel_multigoal_planner parallel_multigoal_planner_node \
+  --ros-args --log-level parallel_multigoal_planner.graph_core:=debug
+```

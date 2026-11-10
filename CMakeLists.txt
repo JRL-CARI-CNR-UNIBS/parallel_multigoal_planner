@@ -13,13 +13,11 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
-find_package(ament_index_cpp REQUIRED)
 
 find_package(parallel_multigoal_planner_msgs REQUIRED)
 find_package(ik_solver_msgs REQUIRED)
 find_package(graph_core REQUIRED)
 find_package(mirrt_star REQUIRED)
-find_package(cnr_logger REQUIRED)
 find_package(moveit_core REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 find_package(moveit_collision_checker REQUIRED)
@@ -45,10 +43,8 @@ ament_target_dependencies(${PROJECT_NAME} PUBLIC
   rclcpp_action
   moveit_msgs
   trajectory_msgs
-  ament_index_cpp
   parallel_multigoal_planner_msgs
   ik_solver_msgs
-  cnr_logger
   moveit_core
   moveit_ros_planning
 )
@@ -64,7 +60,6 @@ target_link_libraries(${PROJECT_NAME}_node PUBLIC
 ament_target_dependencies(${PROJECT_NAME}_node PUBLIC
   rclcpp
   rclcpp_action
-  ament_index_cpp
   moveit_msgs
   parallel_multigoal_planner_msgs
 )
@@ -103,7 +98,6 @@ ament_export_dependencies(
   ik_solver_msgs
   graph_core
   mirrt_star
-  cnr_logger
   moveit_core
   moveit_ros_planning
   moveit_collision_checker

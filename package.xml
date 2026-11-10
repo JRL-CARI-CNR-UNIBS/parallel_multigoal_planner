@@ -19,18 +19,17 @@
   <depend>rclcpp_action</depend>
   <depend>moveit_msgs</depend>
   <depend>trajectory_msgs</depend>
-  <depend>ament_index_cpp</depend>
 
   <depend>parallel_multigoal_planner_msgs</depend>
   <depend>ik_solver_msgs</depend>
   <depend>mirrt_star</depend>
   <depend>graph_core</depend>
-  <depend>cnr_logger</depend>
   <depend>moveit_core</depend>
   <depend>moveit_ros_planning</depend>
   <depend>moveit_collision_checker</depend>
 
   <exec_depend>ik_solver</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rclpy</exec_depend>
