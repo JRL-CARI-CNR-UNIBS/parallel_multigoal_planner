@@ -16,11 +16,9 @@ const rclcpp::Logger kLogger = rclcpp::get_logger("parallel_multigoal_planner.go
 
 GoalSetBuilder::GoalSetBuilder(rclcpp::Client<ik_solver_msgs::srv::GetBound>::SharedPtr bounds_client,
                                rclcpp::Client<ik_solver_msgs::srv::GetIkArray>::SharedPtr ik_client,
-                               rclcpp::Client<ik_solver_msgs::srv::CollisionChecking>::SharedPtr collision_client,
                                const cnr_logger::TraceLoggerPtr& logger, double service_timeout_s)
   : bounds_client_(bounds_client)
   , ik_client_(ik_client)
-  , collision_client_(collision_client)
   , logger_(logger)
   , service_timeout_s_(service_timeout_s)
 {
@@ -86,56 +84,9 @@ bool GoalSetBuilder::jointGoalFromConstraints(const moveit_msgs::msg::Constraint
   return reorderByJointName(names, values, canonical_joint_names, out_config, error);
 }
 
-std::vector<bool> GoalSetBuilder::filterCollisionFree(const std::vector<Eigen::VectorXd>& configs,
-                                                      const std::vector<std::string>& joint_names)
-{
-  std::vector<bool> feasible(configs.size(), false);
-  if (configs.empty())
-    return feasible;
-
-  if (!collision_client_->wait_for_service(std::chrono::duration<double>(service_timeout_s_)))
-  {
-    CNR_ERROR(logger_, "/collision_check service is not available.");
-    return feasible;
-  }
-
-  RCLCPP_DEBUG(kLogger, "filterCollisionFree: checking %zu configuration(s).", configs.size());
-  auto request = std::make_shared<ik_solver_msgs::srv::CollisionChecking::Request>();
-  request->joint_names = joint_names;
-  request->detailed = false;
-  request->solutions.reserve(configs.size());
-  for (const auto& q : configs)
-  {
-    ik_solver_msgs::msg::Configuration cfg;
-    cfg.configuration.assign(q.data(), q.data() + q.size());
-    request->solutions.push_back(std::move(cfg));
-  }
-
-  auto future = collision_client_->async_send_request(request);
-  if (future.wait_for(std::chrono::duration<double>(service_timeout_s_)) != std::future_status::ready)
-  {
-    CNR_ERROR(logger_, "Timeout waiting for /collision_check response.");
-    return feasible;
-  }
-
-  auto response = future.get();
-  if (response->result.size() != configs.size())
-  {
-    CNR_ERROR(logger_, "/collision_check returned " << response->result.size() << " results for " << configs.size()
-                                                      << " requested configurations (joint_names mismatch?).");
-    return feasible;
-  }
-
-  for (size_t i = 0; i < response->result.size(); ++i)
-    feasible[i] = (response->result[i].feasibility > 0.5) && !response->result[i].out_of_bound;
-
-  RCLCPP_DEBUG(kLogger, "filterCollisionFree: %zu/%zu configuration(s) feasible.",
-               static_cast<size_t>(std::count(feasible.begin(), feasible.end(), true)), configs.size());
-  return feasible;
-}
-
 bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
                                         const std::vector<std::string>& canonical_joint_names,
+                                        const graph::core::CollisionCheckerPtr& checker,
                                         std::vector<Eigen::VectorXd>& out_configs, std::string& error)
 {
   const auto& pc = c.position_constraints.front();
@@ -199,12 +150,11 @@ bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
 
   RCLCPP_DEBUG(kLogger, "solveCartesianGoal: %zu IK solution(s) received.", ik_configs.size());
 
-  std::vector<bool> feasible = filterCollisionFree(ik_configs, canonical_joint_names);
   size_t added = 0;
-  for (size_t i = 0; i < ik_configs.size(); ++i)
-    if (feasible[i])
+  for (const auto& q : ik_configs)
+    if (checker->check(q))
     {
-      out_configs.push_back(ik_configs[i]);
+      out_configs.push_back(q);
       ++added;
     }
 
@@ -215,6 +165,7 @@ bool GoalSetBuilder::solveCartesianGoal(const moveit_msgs::msg::Constraints& c,
 
 bool GoalSetBuilder::buildGoalConfigurations(const std::vector<moveit_msgs::msg::Constraints>& goal_constraints,
                                              const std::vector<std::string>& canonical_joint_names,
+                                             const graph::core::CollisionCheckerPtr& checker,
                                              std::vector<Eigen::VectorXd>& goal_configurations, std::string& error)
 {
   goal_configurations.clear();
@@ -242,7 +193,7 @@ bool GoalSetBuilder::buildGoalConfigurations(const std::vector<moveit_msgs::msg:
     else if (has_pose_goal)
     {
       std::string local_err;
-      if (!solveCartesianGoal(c, canonical_joint_names, goal_configurations, local_err))
+      if (!solveCartesianGoal(c, canonical_joint_names, checker, goal_configurations, local_err))
       {
         error = "goal_constraints[" + std::to_string(i) + "]: " + local_err;
         return false;

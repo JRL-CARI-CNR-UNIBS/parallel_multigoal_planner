@@ -4,9 +4,10 @@
   <version>0.0.0</version>
   <description>
     Action server that plans a motion reaching any one of several alternative
-    Cartesian/joint-space goals, using ik_solver + collision_checker_server to
-    build a candidate joint-space goal set and mirrt_star (MultigoalSolver) to
-    plan a path to it.
+    Cartesian/joint-space goals, using ik_solver to build a candidate
+    joint-space goal set and mirrt_star (MultigoalSolver) to plan a path to it.
+    Collisions are checked in-process (moveit_collision_checker) on the
+    planning scene fetched from move_group at each request.
   </description>
 
   <maintainer email="manuel.beschi@unibs.it">Manuel Beschi</maintainer>
@@ -25,9 +26,11 @@
   <depend>mirrt_star</depend>
   <depend>graph_core</depend>
   <depend>cnr_logger</depend>
+  <depend>moveit_core</depend>
+  <depend>moveit_ros_planning</depend>
+  <depend>moveit_collision_checker</depend>
 
   <exec_depend>ik_solver</exec_depend>
-  <exec_depend>collision_checker_server</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rclpy</exec_depend>

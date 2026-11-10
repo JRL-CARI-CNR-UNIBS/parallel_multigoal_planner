@@ -8,17 +8,22 @@ sequenceDiagram
     participant Server as ParallelMultigoalPlannerActionServer
     participant Bounds as ik_solver:~get_bounds
     participant IK as ik_solver:~get_task_redundant_ik_array
-    participant CC as collision_checker_server:/collision_check
+    participant Scene as move_group:/get_planning_scene
     participant Solver as MultigoalSolver (mirrt_star)
 
     Client->>Server: send_goal(ParallelMultigoalPlan)
-    Server->>Server: handle_goal() — reject if goal_constraints empty
+    Server->>Server: handle_goal() — reject if goal_constraints or group_name empty
     Server-->>Client: ACCEPT_AND_EXECUTE
     Server->>Server: handle_accepted() spawns detached thread -> execute()
 
+    Server->>Server: joint_names = active joints of group_name (robot model)
     Note over Server,Bounds: once per node lifetime (cached)
     Server->>Bounds: GetBound.Request()
-    Bounds-->>Server: joint_names, lower/upper bounds
+    Bounds-->>Server: joint names, lower/upper bounds (reordered to joint_names)
+
+    Server->>Scene: GetPlanningScene.Request()
+    Scene-->>Server: current scene
+    Server->>Server: checker = ParallelMoveitCollisionChecker(scene, group_name)
 
     Server->>Server: start_q = reorder(start_state, joint_names)
 
@@ -28,9 +33,7 @@ sequenceDiagram
         else c.position/orientation_constraints set
             Server->>IK: GetIkArray.Request(target pose)
             IK-->>Server: IkSolution[] (many joint configs)
-            Server->>CC: CollisionChecking.Request(all configs, batched)
-            CC-->>Server: feasibility per config
-            Server->>Server: keep collision-free configs as candidates
+            Server->>Server: keep configs with checker->check(q) == true
         end
     end
 
@@ -41,8 +44,7 @@ sequenceDiagram
     loop until solved, cancelled, or timeout
         Server->>Server: is_canceling()?
         Server->>Solver: update(solution)
-        Solver->>CC: (internally, via ServiceCollisionChecker) batched edge checks
-        CC-->>Solver: feasibility
+        Solver->>Solver: edge checks with the local checker (in-process)
         Server-->>Client: feedback(status, progress)  [every feedback_period_iterations]
     end
 
@@ -54,27 +56,23 @@ sequenceDiagram
 
 | Class | File | Responsibility |
 |---|---|---|
-| `ParallelMultigoalPlannerActionServer` | `parallel_multigoal_planner_action_server.{hpp,cpp}` | Owns the action server, the three service clients, orchestrates one `execute()` per goal, converts `Path` → `MotionPlanResponse`. |
-| `GoalSetBuilder` | `goal_set_builder.{hpp,cpp}` | Turns `goal_constraints[]` into a flat `std::vector<Eigen::VectorXd>` of candidate joint-space goals. Owns the `~get_bounds` / `~get_task_redundant_ik_array` / `/collision_check` request/response plumbing for that purpose. |
-| `ServiceCollisionChecker` | `service_collision_checker.{hpp,cpp}` | A `graph::core::CollisionCheckerBase` that forwards `check()`/`checkConnection()` to `/collision_check`, batching a whole tree edge into one request. Used **by the solver itself**, not by `GoalSetBuilder` (which calls `/collision_check` directly for a different reason — filtering a batch of IK solutions once, not repeatedly during tree search). |
+| `ParallelMultigoalPlannerActionServer` | `parallel_multigoal_planner_action_server.{hpp,cpp}` | Owns the action server, the robot model and the three service clients; for each goal fetches the planning scene, creates the collision checker, runs `execute()` and converts `Path` → `MotionPlanResponse`. |
+| `GoalSetBuilder` | `goal_set_builder.{hpp,cpp}` | Turns `goal_constraints[]` into a flat `std::vector<Eigen::VectorXd>` of candidate joint-space goals. Owns the `~get_bounds` / `~get_task_redundant_ik_array` request/response plumbing, and filters IK solutions with the collision checker it is given. |
+| `graph::collision_check::ParallelMoveitCollisionChecker` | `moveit_collision_checker` package | In-process collision checker on a local copy of the planning scene. One instance per goal, shared by `GoalSetBuilder` (IK filtering) and `MultigoalSolver` (tree extension). |
 | `reorderByJointName()` | `joint_order_utils.hpp` | The one place that maps a `(names, values)` pair (from a `JointState`, a `JointConstraint[]`, or an IK response) onto the canonical joint order. Every `Eigen::VectorXd` in the planner goes through this. |
 
-## Why two different collision-check call sites?
+## Collision checking
 
-It's the same ROS service (`/collision_check`) reached two different ways,
-for two different access patterns:
+All collision checks run in-process, on a `planning_scene::PlanningScene`
+built from `/get_planning_scene` when the request starts. The same checker is
+used to filter IK solutions (once per Cartesian goal element) and by
+`MultigoalSolver` while it extends its trees (the hot path: thousands of
+calls per goal). `checkConnection()` checks points `checker_resolution`
+apart along each edge, split across `checker_threads` threads.
 
-- **`GoalSetBuilder::filterCollisionFree()`** — called once per Cartesian
-  `goal_constraints` element, with *all* of that element's IK solutions
-  batched into a single request. This happens before any planning starts.
-- **`ServiceCollisionChecker`** — called by `MultigoalSolver` itself,
-  potentially thousands of times per goal, as it extends its search tree.
-  `checkConnection()` batches the sampled points of one tree edge into one
-  request (governed by `checker_min_distance`), which is the hot path, but
-  it's still one service round-trip per edge — see
-  [Known limitations](../README.md#known-limitations) and
-  [tuning](05-tuning-and-parameters.md) if this turns out to be a
-  bottleneck for your robot/scene.
+Each request gets its own scene and checker, so concurrent requests do not
+share collision state, and a request does not see scene changes made while it
+is planning.
 
 ## Why drive `update()` manually instead of calling `solve()`?
 

@@ -22,8 +22,8 @@ What it does, every iteration:
 This only *plans*, it never sends anything to a controller -- the robot
 never actually moves, so re-running it repeatedly is harmless.
 
-Requires, already running: MoveIt-ish `robot_description`, `ik_solver`, and
-`collision_checker_server` -- see docs/01-quickstart.md in this package.
+Requires, already running: MoveIt-ish `robot_description`, `ik_solver`,
+`move_group` (`/get_planning_scene`) and `parallel_multigoal_planner` -- see docs/01-quickstart.md in this package.
 
 Usage
 -----
@@ -104,7 +104,7 @@ class TestDisplayPlannedPath(Node):
         self.declare_parameter("action_name", "parallel_multigoal_plan")
         self.declare_parameter("joint_states_topic", "/joint_states")
         self.declare_parameter("display_planned_path_topic", "/display_planned_path")
-        self.declare_parameter("group_name", "manipulator")  # cosmetic only, see docs/02
+        self.declare_parameter("group_name", "manipulator")  # MoveIt planning group (required by the planner)
         self.declare_parameter("num_goals", 16)
         self.declare_parameter("radius", 0.10)  # meters
         self.declare_parameter("z_offset", 0.0)  # meters, applied to the whole ring

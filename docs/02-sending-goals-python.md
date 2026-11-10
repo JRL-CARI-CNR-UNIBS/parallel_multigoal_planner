@@ -66,7 +66,7 @@ of [tutorial 1](01-quickstart.md#5-confirm-the-action-is-up).
 def send_joint_goal(client: PlannerClient, start_positions, goal_positions):
     goal = ParallelMultigoalPlan.Goal()
     goal.motion_plan_request.start_state.joint_state = client.start_state(start_positions)
-    goal.motion_plan_request.group_name = "manipulator"  # cosmetic: copied into the response
+    goal.motion_plan_request.group_name = "manipulator"  # MoveIt planning group: required, defines joints and collision checking
     goal.motion_plan_request.allowed_planning_time = 5.0
     goal.verbose = True
 

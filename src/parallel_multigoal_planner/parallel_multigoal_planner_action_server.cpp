@@ -1,5 +1,6 @@
 #include <chrono>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 
@@ -13,6 +14,7 @@
 #include <graph_core/metrics/euclidean_metrics.h>
 #include <graph_core/metrics/goal_cost_function_base.h>
 #include <graph_core/samplers/uniform_sampler.h>
+#include <moveit_collision_checker/collision_checkers/parallel_moveit_collision_checker.h>
 
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include <rclcpp/version.h>
@@ -37,8 +39,8 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
   : node_(node)
 {
   const std::string ik_solver_ns = node_->declare_parameter<std::string>("ik_solver_ns", "ik_solver");
-  const std::string collision_check_service =
-      node_->declare_parameter<std::string>("collision_check_service", "/collision_check");
+  const std::string planning_scene_service =
+      node_->declare_parameter<std::string>("planning_scene_service", "/get_planning_scene");
 
   service_timeout_s_ = node_->declare_parameter<double>("service_timeout_s", 5.0);
   default_allowed_planning_time_ = node_->declare_parameter<double>("default_allowed_planning_time", 5.0);
@@ -47,7 +49,8 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
   feedback_period_iterations_ =
       static_cast<unsigned int>(node_->declare_parameter<int>("feedback_period_iterations", 200));
   waypoint_dt_s_ = node_->declare_parameter<double>("waypoint_dt_s", 0.5);
-  checker_min_distance_ = node_->declare_parameter<double>("checker_min_distance", 0.05);
+  checker_resolution_ = node_->declare_parameter<double>("checker_resolution", 0.02);
+  checker_threads_ = static_cast<int>(node_->declare_parameter<int>("checker_threads", 4));
   mirrt_param_ns_ = node_->declare_parameter<std::string>("mirrt_star_param_ns", "/parallel_multigoal_planner/mirrt_star");
 
   std::string default_logger_config;
@@ -65,28 +68,33 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
 
   RCLCPP_DEBUG(node_->get_logger(),
                "Parameters: service_timeout_s=%.3f default_allowed_planning_time=%.3f direct_connect_time=%.3f "
-               "max_iterations=%u feedback_period_iterations=%u waypoint_dt_s=%.3f checker_min_distance=%.4f "
+               "max_iterations=%u feedback_period_iterations=%u waypoint_dt_s=%.3f checker_resolution=%.4f checker_threads=%d "
                "mirrt_star_param_ns='%s' logger_config_file='%s'",
                service_timeout_s_, default_allowed_planning_time_, direct_connect_time_, max_iterations_,
-               feedback_period_iterations_, waypoint_dt_s_, checker_min_distance_, mirrt_param_ns_.c_str(),
+               feedback_period_iterations_, waypoint_dt_s_, checker_resolution_, checker_threads_, mirrt_param_ns_.c_str(),
                logger_config.c_str());
+
+  // Kinematics plugins are not needed: IK comes from the ik_solver node.
+  robot_model_loader_ = std::make_shared<robot_model_loader::RobotModelLoader>(node_, "robot_description", false);
+  robot_model_ = robot_model_loader_->getModel();
+  if (!robot_model_)
+    throw std::runtime_error("parallel_multigoal_planner: unable to load the robot model from robot_description");
 
   cb_group_bounds_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   cb_group_ik_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  cb_group_collision_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  cb_group_scene_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
   bounds_client_ = node_->create_client<ik_solver_msgs::srv::GetBound>(
       "/" + ik_solver_ns + "/get_bounds", serviceQoS(), cb_group_bounds_);
   ik_client_ = node_->create_client<ik_solver_msgs::srv::GetIkArray>(
       "/" + ik_solver_ns + "/get_task_redundant_ik_array", serviceQoS(), cb_group_ik_);
-  collision_client_ = node_->create_client<ik_solver_msgs::srv::CollisionChecking>(
-      collision_check_service, serviceQoS(), cb_group_collision_);
+  scene_client_ = node_->create_client<moveit_msgs::srv::GetPlanningScene>(planning_scene_service, serviceQoS(),
+                                                                           cb_group_scene_);
 
   RCLCPP_DEBUG(node_->get_logger(), "Service clients created: '%s', '%s', '%s'", bounds_client_->get_service_name(),
-               ik_client_->get_service_name(), collision_client_->get_service_name());
+               ik_client_->get_service_name(), scene_client_->get_service_name());
 
-  goal_builder_ =
-      std::make_unique<GoalSetBuilder>(bounds_client_, ik_client_, collision_client_, logger_, service_timeout_s_);
+  goal_builder_ = std::make_unique<GoalSetBuilder>(bounds_client_, ik_client_, logger_, service_timeout_s_);
 
   using std::placeholders::_1;
   using std::placeholders::_2;
@@ -96,33 +104,83 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
                                                  std::bind(&ParallelMultigoalPlannerActionServer::handle_cancel, this, _1),
                                                  std::bind(&ParallelMultigoalPlannerActionServer::handle_accepted, this, _1));
 
-  RCLCPP_INFO(node_->get_logger(), "parallel_multigoal_plan action server ready (ik_solver_ns='%s', collision_check_service='%s').",
-              ik_solver_ns.c_str(), collision_check_service.c_str());
+  RCLCPP_INFO(node_->get_logger(), "parallel_multigoal_plan action server ready (ik_solver_ns='%s', planning_scene_service='%s').",
+              ik_solver_ns.c_str(), planning_scene_service.c_str());
 }
 
-bool ParallelMultigoalPlannerActionServer::ensureJointModel(std::string& error)
+bool ParallelMultigoalPlannerActionServer::ensureIkBounds(std::string& error)
 {
-  std::lock_guard<std::mutex> lk(joint_model_mtx_);
-  if (joint_model_ready_)
-  {
-    RCLCPP_DEBUG(node_->get_logger(), "Joint model already cached (%zu joints).", joint_names_.size());
+  std::lock_guard<std::mutex> lk(ik_bounds_mtx_);
+  if (ik_bounds_ready_)
     return true;
-  }
 
-  RCLCPP_DEBUG(node_->get_logger(), "Fetching joint model from get_bounds service...");
-  if (!goal_builder_->fetchJointModel(joint_names_, lower_bound_, upper_bound_, error))
+  RCLCPP_DEBUG(node_->get_logger(), "Fetching joint bounds from get_bounds service...");
+  Eigen::VectorXd lb, ub;
+  if (!goal_builder_->fetchJointModel(ik_joint_names_, lb, ub, error))
     return false;
 
-  for (size_t i = 0; i < joint_names_.size(); ++i)
-    RCLCPP_DEBUG(node_->get_logger(), "  joint[%zu] '%s' bounds=[%.4f, %.4f]", i, joint_names_[i].c_str(),
-                 lower_bound_(static_cast<Eigen::Index>(i)), upper_bound_(static_cast<Eigen::Index>(i)));
+  ik_lower_bound_.assign(lb.data(), lb.data() + lb.size());
+  ik_upper_bound_.assign(ub.data(), ub.data() + ub.size());
+  for (size_t i = 0; i < ik_joint_names_.size(); ++i)
+    RCLCPP_DEBUG(node_->get_logger(), "  joint[%zu] '%s' bounds=[%.4f, %.4f]", i, ik_joint_names_[i].c_str(),
+                 ik_lower_bound_[i], ik_upper_bound_[i]);
 
-  checker_ =
-      std::make_shared<ServiceCollisionChecker>(collision_client_, joint_names_, logger_, checker_min_distance_,
-                                                 service_timeout_s_);
+  ik_bounds_ready_ = true;
+  return true;
+}
 
-  joint_model_ready_ = true;
-  RCLCPP_DEBUG(node_->get_logger(), "Joint model ready (%zu joints), collision checker created.", joint_names_.size());
+bool ParallelMultigoalPlannerActionServer::resolveGroup(const std::string& group_name,
+                                                        std::vector<std::string>& joint_names,
+                                                        Eigen::VectorXd& lower_bound, Eigen::VectorXd& upper_bound,
+                                                        std::string& error)
+{
+  const moveit::core::JointModelGroup* jmg = robot_model_->getJointModelGroup(group_name);
+  if (!jmg)
+  {
+    error = "planning group '" + group_name + "' not found in the robot model";
+    return false;
+  }
+  // Same joint order used by MoveitCollisionChecker.
+  joint_names = jmg->getActiveJointModelNames();
+
+  if (!ensureIkBounds(error))
+    return false;
+
+  std::string reorder_err;
+  if (!reorderByJointName(ik_joint_names_, ik_lower_bound_, joint_names, lower_bound, reorder_err) ||
+      !reorderByJointName(ik_joint_names_, ik_upper_bound_, joint_names, upper_bound, reorder_err))
+  {
+    error = "ik_solver bounds do not match group '" + group_name + "': " + reorder_err;
+    return false;
+  }
+  return true;
+}
+
+bool ParallelMultigoalPlannerActionServer::fetchPlanningScene(planning_scene::PlanningScenePtr& scene,
+                                                              std::string& error)
+{
+  if (!scene_client_->wait_for_service(std::chrono::duration<double>(service_timeout_s_)))
+  {
+    error = std::string("planning scene service '") + scene_client_->get_service_name() + "' not available";
+    return false;
+  }
+  auto req = std::make_shared<moveit_msgs::srv::GetPlanningScene::Request>();
+  using C = moveit_msgs::msg::PlanningSceneComponents;
+  req->components.components = C::SCENE_SETTINGS | C::ROBOT_STATE | C::ROBOT_STATE_ATTACHED_OBJECTS |
+                               C::WORLD_OBJECT_NAMES | C::WORLD_OBJECT_GEOMETRY | C::OCTOMAP | C::TRANSFORMS |
+                               C::ALLOWED_COLLISION_MATRIX | C::LINK_PADDING_AND_SCALING | C::OBJECT_COLORS;
+  auto future = scene_client_->async_send_request(req);
+  if (future.wait_for(std::chrono::duration<double>(service_timeout_s_)) != std::future_status::ready)
+  {
+    error = "timeout waiting for the planning scene";
+    return false;
+  }
+  scene = std::make_shared<planning_scene::PlanningScene>(robot_model_);
+  if (!scene->setPlanningSceneMsg(future.get()->scene))
+  {
+    error = "unable to apply the planning scene";
+    return false;
+  }
   return true;
 }
 
@@ -143,6 +201,12 @@ rclcpp_action::GoalResponse ParallelMultigoalPlannerActionServer::handle_goal(co
   if (goal->motion_plan_request.goal_constraints.empty())
   {
     RCLCPP_ERROR(node_->get_logger(), "Rejected: goal_constraints is empty");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+
+  if (goal->motion_plan_request.group_name.empty())
+  {
+    RCLCPP_ERROR(node_->get_logger(), "Rejected: motion_plan_request.group_name is empty");
     return rclcpp_action::GoalResponse::REJECT;
   }
 
@@ -193,18 +257,36 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
   publish_feedback("Resolving joint model", 0.02f);
 
   std::string err;
-  if (!ensureJointModel(err))
+  std::vector<std::string> joint_names;
+  Eigen::VectorXd lower_bound, upper_bound;
+  if (!resolveGroup(req.group_name, joint_names, lower_bound, upper_bound, err))
   {
     RCLCPP_ERROR(node_->get_logger(), "Cannot resolve joint model: %s", err.c_str());
+    result->motion_plan_response = errorResponse(req, moveit_msgs::msg::MoveItErrorCodes::INVALID_GROUP_NAME);
+    gh->abort(result);
+    return;
+  }
+
+  publish_feedback("Fetching planning scene", 0.05f);
+
+  planning_scene::PlanningScenePtr scene;
+  if (!fetchPlanningScene(scene, err))
+  {
+    RCLCPP_ERROR(node_->get_logger(), "Cannot get the planning scene: %s", err.c_str());
     result->motion_plan_response = errorResponse(req, moveit_msgs::msg::MoveItErrorCodes::FAILURE);
     gh->abort(result);
     return;
   }
 
-  checker_->setVerbose(goal->verbose);
+  // One checker per goal, on a snapshot of the scene taken now: goals running in parallel do not share state.
+  auto checker = std::make_shared<graph::collision_check::ParallelMoveitCollisionChecker>(
+      scene, req.group_name, logger_, checker_threads_, checker_resolution_);
+  checker->setVerbose(goal->verbose);
+  RCLCPP_DEBUG(node_->get_logger(), "execute: collision checker created for group '%s' (%zu joints).",
+               req.group_name.c_str(), joint_names.size());
 
   bool ok = false;
-  Eigen::VectorXd start_q = vectorFromJointState(req.start_state.joint_state, joint_names_, ok, err);
+  Eigen::VectorXd start_q = vectorFromJointState(req.start_state.joint_state, joint_names, ok, err);
   if (!ok)
   {
     RCLCPP_ERROR(node_->get_logger(), "Invalid start_state: %s", err.c_str());
@@ -222,7 +304,7 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
   publish_feedback("Building candidate goal set", 0.10f);
 
   std::vector<Eigen::VectorXd> goal_configs;
-  if (!goal_builder_->buildGoalConfigurations(req.goal_constraints, joint_names_, goal_configs, err))
+  if (!goal_builder_->buildGoalConfigurations(req.goal_constraints, joint_names, checker, goal_configs, err))
   {
     RCLCPP_ERROR(node_->get_logger(), "Failed to build goal set: %s", err.c_str());
     result->motion_plan_response = errorResponse(req, moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS);
@@ -249,11 +331,11 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
   const double allowed_time = (req.allowed_planning_time > 0.0) ? req.allowed_planning_time : default_allowed_planning_time_;
 
   auto metrics = std::make_shared<graph::core::EuclideanMetrics>(logger_);
-  auto sampler = std::make_shared<graph::core::UniformSampler>(lower_bound_, upper_bound_, logger_);
+  auto sampler = std::make_shared<graph::core::UniformSampler>(lower_bound, upper_bound, logger_);
   auto goal_cost_fcn = std::make_shared<graph::core::GoalCostFunctionBase>();
 
   auto solver =
-      std::make_shared<graph::mirrt_star::MultigoalSolver>(metrics, checker_, sampler, goal_cost_fcn, logger_);
+      std::make_shared<graph::mirrt_star::MultigoalSolver>(metrics, checker, sampler, goal_cost_fcn, logger_);
   RCLCPP_DEBUG(node_->get_logger(), "execute: configuring MultigoalSolver from '%s' (allowed_time=%.3f s).",
                mirrt_param_ns_.c_str(), allowed_time);
   solver->config(mirrt_param_ns_);
@@ -358,7 +440,7 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
 
   publish_feedback("Converting solution", 0.95f);
 
-  result->motion_plan_response = pathToMotionPlanResponse(req, start_q, solution, planning_time);
+  result->motion_plan_response = pathToMotionPlanResponse(req, joint_names, start_q, solution, planning_time);
 
   publish_feedback("Done", 1.0f);
   gh->succeed(result);
@@ -367,6 +449,7 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
 
 moveit_msgs::msg::MotionPlanResponse
 ParallelMultigoalPlannerActionServer::pathToMotionPlanResponse(const moveit_msgs::msg::MotionPlanRequest& req,
+                                                               const std::vector<std::string>& joint_names,
                                                                const Eigen::VectorXd& start_q,
                                                                const graph::core::PathPtr& solution,
                                                                double planning_time) const
@@ -382,7 +465,7 @@ ParallelMultigoalPlannerActionServer::pathToMotionPlanResponse(const moveit_msgs
     waypoints.push_back(wp);
 
   trajectory_msgs::msg::JointTrajectory jt;
-  jt.joint_names = joint_names_;
+  jt.joint_names = joint_names;
   jt.points.reserve(waypoints.size());
 
   rclcpp::Duration time_from_start = rclcpp::Duration::from_seconds(0.0);

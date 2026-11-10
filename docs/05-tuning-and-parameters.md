@@ -20,7 +20,7 @@ The three most likely to need changing per-robot:
 /parallel_multigoal_planner:
   ros__parameters:
     ik_solver_ns: "solver1"
-    collision_check_service: "/collision_check"
+    planning_scene_service: "/get_planning_scene"
     default_allowed_planning_time: 5.0
 ```
 
@@ -30,21 +30,21 @@ ros2 run parallel_multigoal_planner parallel_multigoal_planner_node \
 ```
 
 or via the launch file's arguments (`ik_solver_ns`,
-`collision_check_service` — see
+`planning_scene_service` — see
 [`launch/parallel_multigoal_planner.launch.py`](../launch/parallel_multigoal_planner.launch.py)).
 
 A few worth knowing about beyond the "must change per robot" set:
 
 - **`service_timeout_s`** — raise this if `get_bounds` /
-  `get_task_redundant_ik_array` / `/collision_check` calls are timing out
-  under load (a busy `collision_checker_server` batching many points per
-  edge check can be slow on a large scene).
-- **`checker_min_distance`** — the edge-sampling step used by
-  `ServiceCollisionChecker::checkConnection()`. Smaller means more points
-  per tree edge sent to `/collision_check` (safer, slower); larger means
-  fewer, coarser checks (faster, more chance of tunnelling through a thin
-  obstacle). This is a configuration-space distance, so its right order of
-  magnitude depends on your joint bounds/units.
+  `get_task_redundant_ik_array` / `/get_planning_scene` calls are timing
+  out under load (a large octomap makes the planning scene slow to fetch).
+- **`checker_resolution`** — the distance between the points checked along a
+  tree edge by `ParallelMoveitCollisionChecker::checkConnection()`. Smaller
+  means more points per edge (safer, slower); larger means fewer, coarser
+  checks (faster, more chance of tunnelling through a thin obstacle). This is
+  a configuration-space distance, so its right order of magnitude depends on
+  your joint bounds/units.
+- **`checker_threads`** — threads used to check the points of one edge.
 - **`direct_connect_time`** — how long `addGoal()` is allowed to try a
   straight-line connection from the start state to each candidate goal
   before giving up and falling back to tree search for that goal. With many

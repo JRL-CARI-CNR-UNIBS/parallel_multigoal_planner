@@ -1,7 +1,7 @@
 # 1. Quickstart
 
 This walks through bringing up the full chain —
-`ik_solver` → `collision_checker_server` → `parallel_multigoal_planner` — and
+MoveIt → `ik_solver` → `parallel_multigoal_planner` — and
 confirming the action is reachable, before sending any real goals (that's
 tutorials [2](02-sending-goals-python.md) and
 [3](03-sending-goals-cpp.md)).
@@ -13,9 +13,11 @@ You need, for your robot:
 - a MoveIt stack (something publishing `robot_description` and serving
   `/get_planning_scene`, normally `move_group`);
 - an `ik_solver` node configured for your arm (see the
-  [`ik_solver` README](../../ik_solver/README.md));
-- a `collision_checker_server` node configured for the same arm (see the
-  [`collision_checker_server` README](../../collision_check_server/README.md)).
+  [`ik_solver` README](../../ik_solver/README.md)).
+
+Collision checking runs inside the planner, on the planning scene it fetches
+from `/get_planning_scene` at each request: no collision checking node is
+needed.
 
 ## 1. Bring up MoveIt
 
@@ -43,34 +45,21 @@ ros2 service list | grep get_task_redundant_ik_array
 # -> /solver1/get_task_redundant_ik_array
 ```
 
-## 3. Bring up collision_checker_server
-
-```bash
-ros2 run collision_checker_server ik_collision_checker \
-  --ros-args -r __node:=ik_collision_check \
-  --params-file collision_check_params.yaml
-```
-
-```bash
-ros2 service list | grep collision_check
-# -> /collision_check
-```
-
-## 4. Bring up parallel_multigoal_planner
+## 3. Bring up parallel_multigoal_planner
 
 ```bash
 ros2 launch parallel_multigoal_planner parallel_multigoal_planner.launch.py \
-  ik_solver_ns:=solver1 collision_check_service:=/collision_check
+  ik_solver_ns:=solver1
 ```
 
 You should see, on startup:
 
 ```
-[INFO] [parallel_multigoal_planner]: parallel_multigoal_plan action server ready (ik_solver_ns='solver1', collision_check_service='/collision_check').
+[INFO] [parallel_multigoal_planner]: parallel_multigoal_plan action server ready (ik_solver_ns='solver1', planning_scene_service='/get_planning_scene').
 [INFO] [parallel_multigoal_planner]: parallel_multigoal_planner node spinning.
 ```
 
-## 5. Confirm the action is up
+## 4. Confirm the action is up
 
 ```bash
 ros2 action list -t

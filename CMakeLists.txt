@@ -20,9 +20,11 @@ find_package(ik_solver_msgs REQUIRED)
 find_package(graph_core REQUIRED)
 find_package(mirrt_star REQUIRED)
 find_package(cnr_logger REQUIRED)
+find_package(moveit_core REQUIRED)
+find_package(moveit_ros_planning REQUIRED)
+find_package(moveit_collision_checker REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
-  src/${PROJECT_NAME}/service_collision_checker.cpp
   src/${PROJECT_NAME}/goal_set_builder.cpp
   src/${PROJECT_NAME}/parallel_multigoal_planner_action_server.cpp
 )
@@ -35,6 +37,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 target_link_libraries(${PROJECT_NAME} PUBLIC
   graph_core::graph_core
   mirrt_star::mirrt_star
+  moveit_collision_checker::moveit_collision_checker
 )
 
 ament_target_dependencies(${PROJECT_NAME} PUBLIC
@@ -46,6 +49,8 @@ ament_target_dependencies(${PROJECT_NAME} PUBLIC
   parallel_multigoal_planner_msgs
   ik_solver_msgs
   cnr_logger
+  moveit_core
+  moveit_ros_planning
 )
 
 add_executable(${PROJECT_NAME}_node src/${PROJECT_NAME}_node.cpp)
@@ -99,6 +104,9 @@ ament_export_dependencies(
   graph_core
   mirrt_star
   cnr_logger
+  moveit_core
+  moveit_ros_planning
+  moveit_collision_checker
 )
 
 if(BUILD_TESTING)
