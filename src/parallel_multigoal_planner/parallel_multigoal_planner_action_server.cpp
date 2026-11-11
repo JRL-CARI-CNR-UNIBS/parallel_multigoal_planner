@@ -289,6 +289,15 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
     RCLCPP_DEBUG(node_->get_logger(), "execute: start_q = [%s]", ss.str().c_str());
   }
 
+  // addStart() does not check the start: without this the solver would plan for the whole time budget.
+  if (!checker->check(start_q))
+  {
+    RCLCPP_ERROR(node_->get_logger(), "Start state in collision.");
+    result->motion_plan_response = errorResponse(req, moveit_msgs::msg::MoveItErrorCodes::START_STATE_IN_COLLISION);
+    gh->abort(result);
+    return;
+  }
+
   publish_feedback("Building candidate goal set", 0.10f);
 
   std::vector<Eigen::VectorXd> goal_configs;
