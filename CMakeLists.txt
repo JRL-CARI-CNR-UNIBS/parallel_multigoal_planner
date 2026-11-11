@@ -38,16 +38,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   moveit_collision_checker::moveit_collision_checker
 )
 
-ament_target_dependencies(${PROJECT_NAME} PUBLIC
-  rclcpp
-  rclcpp_action
-  moveit_msgs
-  trajectory_msgs
-  parallel_multigoal_planner_msgs
-  ik_solver_msgs
-  moveit_core
-  moveit_ros_planning
-)
+target_link_libraries(${PROJECT_NAME} PUBLIC ${rclcpp_TARGETS} ${rclcpp_action_TARGETS} ${moveit_msgs_TARGETS} ${trajectory_msgs_TARGETS} ${parallel_multigoal_planner_msgs_TARGETS} ${ik_solver_msgs_TARGETS} ${moveit_core_TARGETS} ${moveit_ros_planning_TARGETS})
 
 add_executable(${PROJECT_NAME}_node src/${PROJECT_NAME}_node.cpp)
 target_include_directories(${PROJECT_NAME}_node PUBLIC
@@ -57,12 +48,7 @@ target_include_directories(${PROJECT_NAME}_node PUBLIC
 target_link_libraries(${PROJECT_NAME}_node PUBLIC
   ${PROJECT_NAME}
 )
-ament_target_dependencies(${PROJECT_NAME}_node PUBLIC
-  rclcpp
-  rclcpp_action
-  moveit_msgs
-  parallel_multigoal_planner_msgs
-)
+target_link_libraries(${PROJECT_NAME}_node PUBLIC ${rclcpp_TARGETS} ${rclcpp_action_TARGETS} ${moveit_msgs_TARGETS} ${parallel_multigoal_planner_msgs_TARGETS})
 
 install(TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
