@@ -216,6 +216,7 @@ On failure, `motion_plan_response.error_code.val` is one of the standard
 | `waypoint_dt_s` | double | `0.5` | Fixed spacing (seconds) between consecutive `JointTrajectoryPoint`s in the result — a placeholder timing scheme, not a velocity-limited one. |
 | `checker_resolution` | double | `0.02` | Distance (configuration-space units) between the points checked along a tree edge. |
 | `checker_threads` | int | `4` | Threads used by `ParallelMoveitCollisionChecker` to check an edge. |
+| `collision_padding` | double | `0.0` | [m] safety margin added to the padding of the links moved by the group (robot-world checks only; self-collisions are unpadded), on the planner's copy of the scene. Start and goals are checked with it too. Covers paths grazing an obstacle between two checks at `checker_resolution`; a few mm are enough. Read at every request. |
 | `mirrt_star.*` | — | see `config/mirrt_star.yaml` | Parameters of the mirrt\* solver (e.g. `mirrt_star.max_distance`), passed to `MultigoalSolver::config()` at every request. Missing keys take mirrt\*'s defaults. See [docs/05-tuning-and-parameters.md](docs/05-tuning-and-parameters.md). |
 
 ## Concurrency model

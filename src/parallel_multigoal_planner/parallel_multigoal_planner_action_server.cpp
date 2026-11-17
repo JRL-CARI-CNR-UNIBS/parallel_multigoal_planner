@@ -54,6 +54,8 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
   checker_threads_ = static_cast<int>(node_->declare_parameter<int>("checker_threads", 4));
   // Read at every request: refinement time allowed after the first solution (< 0: until allowed_planning_time).
   node_->declare_parameter<double>("max_refine_time", -1.0);
+  // Read at every request: [m] added to the padding of the links moved by the group (robot-world checks only).
+  node_->declare_parameter<double>("collision_padding", 0.0);
 
   // graph_core / mirrt* messages go to the child logger "<node>.graph_core", so their level can be set
   // separately, e.g. --ros-args --log-level parallel_multigoal_planner.graph_core:=debug
@@ -270,6 +272,16 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
     return;
   }
 
+  // Safety margin: edges are checked at discrete points, so a path that grazes an obstacle may touch it between
+  // two checks. The padding grows the links moved by the group; start and goals are checked with it too.
+  const double padding = std::max(0.0, node_->get_parameter("collision_padding").as_double());
+  if (const auto* jmg = robot_model_->getJointModelGroup(req.group_name); padding > 0.0 && jmg)
+  {
+    auto& env = scene->getCollisionEnvNonConst();
+    for (const moveit::core::LinkModel* link : jmg->getUpdatedLinkModelsWithGeometry())
+      env->setLinkPadding(link->getName(), env->getLinkPadding(link->getName()) + padding);
+  }
+
   // One checker per goal, on a snapshot of the scene taken now: goals running in parallel do not share state.
   auto checker = std::make_shared<graph::collision_check::ParallelMoveitCollisionChecker>(
       scene, req.group_name, logger_, checker_threads_, checker_resolution_);
@@ -296,7 +308,8 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
   // addStart() does not check the start: without this the solver would plan for the whole time budget.
   if (!checker->check(start_q))
   {
-    RCLCPP_ERROR(node_->get_logger(), "Start state in collision.");
+    RCLCPP_ERROR(node_->get_logger(), "Start state in collision%s.",
+                 padding > 0.0 ? (" (collision_padding " + std::to_string(padding) + " m included)").c_str() : "");
     result->motion_plan_response = errorResponse(req, moveit_msgs::msg::MoveItErrorCodes::START_STATE_IN_COLLISION);
     gh->abort(result);
     return;

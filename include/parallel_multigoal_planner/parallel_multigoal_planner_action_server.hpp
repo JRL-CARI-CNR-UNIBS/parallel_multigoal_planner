@@ -73,7 +73,8 @@ public:
    * Parameters: @c ik_solver_ns ("ik_solver"), @c planning_scene_service ("/get_planning_scene"),
    * @c service_timeout_s (5.0), @c default_allowed_planning_time (5.0), @c direct_connect_time (0.2),
    * @c max_iterations (1000000), @c feedback_period_iterations (200), @c waypoint_dt_s (0.5),
-   * @c checker_resolution (0.02), @c checker_threads (4), @c max_refine_time (-1.0: refine until
+   * @c checker_resolution (0.02), @c checker_threads (4), @c collision_padding (0.0 m, added to the group links;
+   * read at every request), @c max_refine_time (-1.0: refine until
    * allowed_planning_time or the utopia threshold; 0: return the first solution; read at every request).
    * The parameters of the mirrt* solver are the node parameters under @c mirrt_star. (e.g.
    * @c mirrt_star.max_distance); they are read at every request.

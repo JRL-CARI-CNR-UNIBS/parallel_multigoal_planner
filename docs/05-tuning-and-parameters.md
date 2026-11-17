@@ -48,6 +48,14 @@ A few worth knowing about beyond the "must change per robot" set:
   straight-line connection from the start state to each candidate goal
   before giving up and falling back to tree search for that goal. With many
   candidate goals this runs once per goal, so keep it small.
+- **`collision_padding`** — safety margin [m] added to the padding of the
+  links moved by the group, on the planner's copy of the scene (move_group is
+  not changed). Edges are checked at discrete points every
+  `checker_resolution`, so a path that grazes an obstacle may touch it between
+  two checks; a few mm (e.g. `0.005`) avoid it on a UR10e. MoveIt pads only
+  robot-world checks, not self-collisions. Start and goals are checked with
+  the padding too, so a start closer than the padding to an obstacle gives
+  `START_STATE_IN_COLLISION`.
 - **`max_refine_time`** — how long [s] the solver may keep improving the
   path after the first solution. Negative (default): until
   `allowed_planning_time`, or until the cost is within

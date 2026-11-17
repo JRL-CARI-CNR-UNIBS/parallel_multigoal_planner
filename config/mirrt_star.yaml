@@ -8,6 +8,8 @@
     # Refinement time [s] allowed after the first solution (planner parameter, not a mirrt* one):
     # < 0: until allowed_planning_time or the utopia threshold; 0: return the first solution.
     max_refine_time: -1.0
+    # [m] extra padding of the links moved by the group against the world (start and goals included)
+    collision_padding: 0.0
     mirrt_star:
       max_distance: 1.0          # [rad] max tree-extension step
       use_kdtree: true
