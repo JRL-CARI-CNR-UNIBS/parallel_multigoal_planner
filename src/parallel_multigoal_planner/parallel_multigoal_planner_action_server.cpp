@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <chrono>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -50,6 +52,8 @@ ParallelMultigoalPlannerActionServer::ParallelMultigoalPlannerActionServer(const
   waypoint_dt_s_ = node_->declare_parameter<double>("waypoint_dt_s", 0.5);
   checker_resolution_ = node_->declare_parameter<double>("checker_resolution", 0.02);
   checker_threads_ = static_cast<int>(node_->declare_parameter<int>("checker_threads", 4));
+  // Read at every request: refinement time allowed after the first solution (< 0: until allowed_planning_time).
+  node_->declare_parameter<double>("max_refine_time", -1.0);
 
   // graph_core / mirrt* messages go to the child logger "<node>.graph_core", so their level can be set
   // separately, e.g. --ros-args --log-level parallel_multigoal_planner.graph_core:=debug
@@ -349,12 +353,14 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
   }
 
   unsigned int registered_goals = 0;
+  double utopia = std::numeric_limits<double>::infinity();  // min ||goal - start|| over the registered goals
   for (const auto& q : goal_configs)
   {
     auto goal_node = std::make_shared<graph::core::Node>(q, logger_);
     if (solver->addGoal(goal_node, direct_connect_time_, 0.0))
     {
       ++registered_goals;
+      utopia = std::min(utopia, (q - start_q).norm());
     }
     else
     {
@@ -377,14 +383,30 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
 
   solver->finalizeProblem();
 
-  graph::core::PathPtr solution;
-  bool solved = solver->solved();  // finalizeProblem()/addGoal() may already have found a direct connection
-  RCLCPP_DEBUG(node_->get_logger(), "execute: problem finalized, solved before loop=%d. Entering planning loop.",
-               static_cast<int>(solved));
+  // Stopping criterion: the cost is within the utopia threshold (same rule as mirrt*: cost <= (1 + tol) * utopia),
+  // the time budget is over, or max_refine_time seconds passed since the first solution
+  // (< 0: no limit, refine until allowed_time; 0: return the first solution).
+  // Read at every request, so `ros2 param set` changes are used.
+  const double max_refine_time = node_->get_parameter("max_refine_time").as_double();
+  const double utopia_tolerance =
+      node_->get_parameter_or<double>(std::string(kMirrtStarPrefix) + ".utopia_tolerance", 0.01);
+  const double cost_threshold = (1.0 + std::max(0.0, utopia_tolerance)) * utopia;
+  auto converged = [&]() { return solver->solved() && solver->getCost() <= cost_threshold; };
+
+  // finalizeProblem()/addGoal() may already have found a direct connection
+  bool solved = solver->solved();
+  RCLCPP_DEBUG(node_->get_logger(),
+               "execute: problem finalized, solved before loop=%d, utopia=%.4f, threshold=%.4f, max_refine_time=%.3f. "
+               "Entering planning loop.",
+               static_cast<int>(solved), utopia, cost_threshold, max_refine_time);
 
   const auto tic = std::chrono::steady_clock::now();
+  double first_solution_time = solved ? 0.0 : -1.0;
+  unsigned int improvements = 0;
+  std::string stop_reason = "max_iterations";
+  graph::core::PathPtr solution;
   unsigned int iter = 0;
-  for (; !solved && iter < max_iterations_; ++iter)
+  for (; iter < max_iterations_; ++iter)
   {
     if (gh->is_canceling())
     {
@@ -394,37 +416,58 @@ void ParallelMultigoalPlannerActionServer::execute(const std::shared_ptr<GoalHan
       return;
     }
 
-    if (solver->update(solution))
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - tic).count();
+    if (converged())
     {
-      RCLCPP_DEBUG(node_->get_logger(), "execute: solver->update() reported a solution at iteration %u.", iter);
-      solved = true;
+      stop_reason = "utopia threshold reached";
       break;
     }
-
-    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - tic).count();
     if (elapsed >= allowed_time)
     {
-      RCLCPP_DEBUG(node_->get_logger(), "execute: time budget exhausted (%.3f s) at iteration %u.", elapsed, iter);
+      stop_reason = "time budget exhausted";
+      break;
+    }
+    if (solved && max_refine_time >= 0.0 && elapsed - first_solution_time >= max_refine_time)
+    {
+      stop_reason = "max_refine_time reached";
       break;
     }
 
+    // update() returns true at every improvement of the global best cost, not only at convergence.
+    if (solver->update(solution))
+    {
+      ++improvements;
+      if (!solved)
+      {
+        solved = true;
+        first_solution_time = elapsed;
+        RCLCPP_DEBUG(node_->get_logger(), "execute: first solution at iteration %u (%.3f s), cost %.4f.", iter,
+                     elapsed, solver->getCost());
+      }
+    }
+    solved = solved || solver->solved();
+
     if (iter % feedback_period_iterations_ == 0)
-      publish_feedback("Planning (iteration " + std::to_string(iter) + ")",
-                        0.30f + 0.60f * static_cast<float>(std::min(1.0, elapsed / allowed_time)));
+      publish_feedback("Planning (iteration " + std::to_string(iter) +
+                           (solved ? ", cost " + std::to_string(solver->getCost()) : std::string()) + ")",
+                       0.30f + 0.60f * static_cast<float>(std::min(1.0, elapsed / allowed_time)));
   }
 
   const double planning_time = std::chrono::duration<double>(std::chrono::steady_clock::now() - tic).count();
-  RCLCPP_DEBUG(node_->get_logger(), "execute: planning loop ended after %u iteration(s), %.3f s, solved=%d.", iter,
-               planning_time, static_cast<int>(solved));
 
-  // solved_ can already be true here without `solution` having been set
-  // locally, e.g. when a candidate goal was directly connected to the start
-  // tree inside addGoal(), before the update() loop ran at all.
-  if (solved && !solution)
-  {
-    RCLCPP_DEBUG(node_->get_logger(), "execute: retrieving solution via getSolution().");
+  // The best solution is kept by the solver: `solution` from update() may be stale or unset (e.g. when a goal
+  // was directly connected inside addGoal(), before the loop).
+  if (solved)
     solution = solver->getSolution();
-  }
+
+  RCLCPP_DEBUG(node_->get_logger(),
+               "execute: planning loop ended after %u iteration(s), %.3f s (%s), solved=%d, %u improvement(s), "
+               "first solution at %.3f s.",
+               iter, planning_time, stop_reason.c_str(), static_cast<int>(solved), improvements, first_solution_time);
+  if (goal->verbose && solved && solution)
+    RCLCPP_INFO(node_->get_logger(), "Solved in %.3f s (%s): cost %.4f, utopia %.4f (ratio %.4f), first solution at %.3f s.",
+                planning_time, stop_reason.c_str(), solution->cost(), utopia, solution->cost() / utopia,
+                first_solution_time);
 
   if (!solved || !solution)
   {

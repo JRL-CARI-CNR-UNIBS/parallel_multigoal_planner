@@ -87,16 +87,31 @@ return false;
 ```
 
 Calling it directly would give no way to check `gh->is_canceling()` or call
-`gh->publish_feedback()` mid-solve. `execute()` reimplements the same
-stopping criterion (stop at the first improving `update()`, or at time/
-iteration limits) itself, adding the cancellation check and periodic
-feedback publish — see `parallel_multigoal_planner_action_server.cpp`.
+`gh->publish_feedback()` mid-solve. Moreover `MultigoalSolver::update()`
+returns `true` at *every* improvement of the global best cost (the first
+solution included), so `solve()` is a first-solution planner.
+
+`execute()` runs its own loop, with the cancellation check, the periodic
+feedback publish, and this stopping criterion (checked before each
+`update()`):
+
+1. the best cost is within the utopia threshold:
+   `cost <= (1 + mirrt_star.utopia_tolerance) * utopia`, with
+   utopia = min over the registered goals of `||goal - start||` (the same
+   rule mirrt\* uses internally to declare convergence);
+2. `allowed_planning_time` is over;
+3. `max_refine_time >= 0` and that many seconds have passed since the first
+   solution (`0` = return the first solution);
+4. `max_iterations` (safety cap).
+
+At the end the path is always taken from `solver->getSolution()`, the best
+one kept by the solver.
 
 One subtlety this handles explicitly: `MultigoalSolver::addGoal()` can
 already find a direct start→goal connection (and set `solved_ = true`)
 *before* the `update()` loop ever runs — in that case `solver->getSolution()`
-is used to retrieve the path, since the loop body (which is what would
-otherwise assign the local `solution` variable) never executes.
+is used to retrieve the path; the loop then only refines it (criterion 1
+usually stops it at once, since a direct connection is the utopia).
 
 ## Threading
 

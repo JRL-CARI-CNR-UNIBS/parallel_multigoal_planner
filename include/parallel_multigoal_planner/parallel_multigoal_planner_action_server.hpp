@@ -54,7 +54,8 @@ namespace parallel_multigoal_planner
  *  4. Feeds the candidate set to a fresh graph::mirrt_star::MultigoalSolver
  *     and drives its update() loop directly (rather than the blocking
  *     TreeSolver::solve()) so that goal cancellation and feedback publishing
- *     both work.
+ *     both work, and so that it keeps refining after the first solution until
+ *     the utopia threshold, the time budget, or max_refine_time.
  *  5. Converts the resulting graph::core::Path into a MotionPlanResponse.
  */
 class ParallelMultigoalPlannerActionServer
@@ -72,7 +73,8 @@ public:
    * Parameters: @c ik_solver_ns ("ik_solver"), @c planning_scene_service ("/get_planning_scene"),
    * @c service_timeout_s (5.0), @c default_allowed_planning_time (5.0), @c direct_connect_time (0.2),
    * @c max_iterations (1000000), @c feedback_period_iterations (200), @c waypoint_dt_s (0.5),
-   * @c checker_resolution (0.02), @c checker_threads (4).
+   * @c checker_resolution (0.02), @c checker_threads (4), @c max_refine_time (-1.0: refine until
+   * allowed_planning_time or the utopia threshold; 0: return the first solution; read at every request).
    * The parameters of the mirrt* solver are the node parameters under @c mirrt_star. (e.g.
    * @c mirrt_star.max_distance); they are read at every request.
    * See docs/05-tuning-and-parameters.md.

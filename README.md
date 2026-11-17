@@ -211,6 +211,7 @@ On failure, `motion_plan_response.error_code.val` is one of the standard
 | `default_allowed_planning_time` | double | `5.0` | Used when `motion_plan_request.allowed_planning_time <= 0`. |
 | `direct_connect_time` | double | `0.2` | Per-goal timeout given to `MultigoalSolver::addGoal()`'s straight-line direct-connection attempt from the start state. |
 | `max_iterations` | int | `1000000` | Hard cap on solver `update()` iterations (the time budget above is the effective limit in practice). |
+| `max_refine_time` | double | `-1.0` | Time [s] the solver may keep refining after the first solution. `< 0`: until `allowed_planning_time` (or the utopia threshold); `0`: return the first solution (the old behavior). Read at every request. |
 | `feedback_period_iterations` | int | `200` | Publish an action feedback message every N solver iterations. |
 | `waypoint_dt_s` | double | `0.5` | Fixed spacing (seconds) between consecutive `JointTrajectoryPoint`s in the result — a placeholder timing scheme, not a velocity-limited one. |
 | `checker_resolution` | double | `0.02` | Distance (configuration-space units) between the points checked along a tree edge. |
@@ -242,10 +243,13 @@ On failure, `motion_plan_response.error_code.val` is one of the standard
   transform**. They must already be expressed in `ik_solver`'s base frame.
 - The output trajectory's timing (`waypoint_dt_s` spacing) is a fixed
   placeholder, not velocity/acceleration-limited time parameterization.
-- `MultigoalSolver::update()`'s loop is stopped as soon as *any* improving
-  update occurs (matching `graph_core::TreeSolver`'s own default `solve()`
-  semantics) — this is a first-solution planner, not one that keeps
-  refining for the full time budget once a solution is found.
+- After the first solution the solver keeps refining until the cost is within
+  the utopia threshold (`cost <= (1 + mirrt_star.utopia_tolerance) * utopia`,
+  utopia = min over the registered goals of `||goal - start||`), the time
+  budget ends, or `max_refine_time` seconds have passed since the first
+  solution. When no threshold is reached (e.g. obstacles on every straight
+  line) the whole `allowed_planning_time` is used unless `max_refine_time`
+  is set; `max_refine_time: 0` gives back the first-solution behavior.
 - `start_state.joint_state` must contain every active joint of the planning
   group; partial start states are rejected.
 - The planning scene is fetched once per request: obstacles added while a

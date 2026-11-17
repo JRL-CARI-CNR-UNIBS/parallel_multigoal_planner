@@ -48,6 +48,12 @@ A few worth knowing about beyond the "must change per robot" set:
   straight-line connection from the start state to each candidate goal
   before giving up and falling back to tree search for that goal. With many
   candidate goals this runs once per goal, so keep it small.
+- **`max_refine_time`** — how long [s] the solver may keep improving the
+  path after the first solution. Negative (default): until
+  `allowed_planning_time`, or until the cost is within
+  `(1 + mirrt_star.utopia_tolerance) * utopia`. `0`: return the first
+  solution. A small value (e.g. `0.5`) bounds the latency when obstacles
+  make the utopia threshold unreachable.
 - **`waypoint_dt_s`** — purely cosmetic time-spacing between trajectory
   points in the result; not velocity-limited (see
   [README → Known limitations](../README.md#known-limitations)). If you
